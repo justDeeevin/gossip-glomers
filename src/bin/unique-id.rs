@@ -3,13 +3,14 @@ use std::convert::Infallible;
 use gossip_glomers::{Node, RuntimeError, main_loop};
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-struct Echo;
+struct UniqueId;
 
-impl Node for Echo {
+impl Node for UniqueId {
     type State = ();
-    type Request = EchoRequest;
-    type Response = EchoResponse;
+    type Request = Request;
+    type Response = Response;
     type HandleError = Infallible;
 
     fn from_init(_state: Self::State, _init: gossip_glomers::Init) -> Self {
@@ -18,25 +19,24 @@ impl Node for Echo {
 
     fn handle(
         &mut self,
-        input: gossip_glomers::Message<Self::Request>,
+        _input: gossip_glomers::Message<Self::Request>,
     ) -> Result<Self::Response, Self::HandleError> {
-        let EchoRequest::Echo { echo } = input.body.payload;
-        Ok(EchoResponse::EchoOk { echo })
+        Ok(Response::GenerateOk { id: Uuid::new_v4() })
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum EchoRequest {
-    Echo { echo: String },
+enum Request {
+    Generate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum EchoResponse {
-    EchoOk { echo: String },
+enum Response {
+    GenerateOk { id: Uuid },
 }
 
 fn main() -> Result<(), RuntimeError<Infallible>> {
-    main_loop::<Echo>(())
+    main_loop::<UniqueId>(())
 }
