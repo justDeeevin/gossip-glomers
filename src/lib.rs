@@ -26,7 +26,7 @@ pub enum SendError {
 }
 
 impl<P: Serialize> Message<P> {
-    pub fn send(&self, out: &mut impl Write) -> Result<(), SendError> {
+    pub fn send_to(&self, out: &mut impl Write) -> Result<(), SendError> {
         serde_json::to_writer(&mut *out, self)?;
         out.write_all(b"\n")?;
         Ok(())
@@ -61,8 +61,8 @@ pub struct Init {
 
 pub trait Node: Sized {
     type State;
-    type Request;
-    type Response;
+    type Request: DeserializeOwned;
+    type Response: Serialize;
     type HandleError;
 
     fn from_init(state: Self::State, init: Init) -> Self;
@@ -75,7 +75,7 @@ pub trait Node: Sized {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError<E> {
-    #[error("Incomplete init handshake")]
+    #[error("No init message received")]
     NoInit,
     #[error("Failed to get a line from stdin")]
     Stdin(
@@ -99,11 +99,7 @@ pub enum RuntimeError<E> {
     Handle(#[source] E),
 }
 
-pub fn main_loop<N: Node>(init_state: N::State) -> Result<(), RuntimeError<N::HandleError>>
-where
-    N::Request: DeserializeOwned,
-    N::Response: Serialize,
-{
+pub fn main_loop<N: Node>(init_state: N::State) -> Result<(), RuntimeError<N::HandleError>> {
     let stdin = std::io::stdin().lock();
     let mut input =
         serde_json::Deserializer::from_reader(stdin).into_iter::<Message<InitRequest>>();
@@ -115,19 +111,17 @@ where
 
     let mut node = N::from_init(init_state, init);
 
-    let mut msg_id = 0;
-
     let reply = Message {
         src: init_msg.dest,
         dest: init_msg.src,
         body: Body {
-            msg_id: Some(0),
+            msg_id: init_msg.body.msg_id.map(|id| id + 1),
             in_reply_to: init_msg.body.msg_id,
             payload: InitResponse::InitOk,
         },
     };
 
-    reply.send(&mut stdout)?;
+    reply.send_to(&mut stdout)?;
 
     drop(input);
 
@@ -135,8 +129,6 @@ where
     let input = serde_json::Deserializer::from_reader(stdin).into_iter::<Message<N::Request>>();
 
     for msg in input {
-        msg_id += 1;
-
         let msg = msg?;
 
         let src = msg.dest.clone();
@@ -148,13 +140,13 @@ where
             src,
             dest,
             body: Body {
-                msg_id: Some(msg_id),
+                msg_id: in_reply_to.map(|id| id + 1),
                 in_reply_to,
                 payload,
             },
         };
 
-        reply.send(&mut stdout)?;
+        reply.send_to(&mut stdout)?;
     }
 
     Ok(())
